@@ -10,8 +10,6 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Biblioteca de Autenticação do Google -->
-    <script src="https://accounts.google.com/gsi/client"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
@@ -32,14 +30,10 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- CONFIGURAÇÕES DO SUPABASE ---
+        // --- CONFIGURAÇÕES SUPABASE ---
         const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        // --- CONFIGURAÇÕES DO GOOGLE DRIVE ---
-        const GOOGLE_CLIENT_ID = '575870645789-scanb4hr32s4dlpp7d3mg6if3u4endgs.apps.googleusercontent.com';
-        const GOOGLE_API_KEY = 'AIzaSyD0bS_dJmd98X3TfVpoX0_jS_kLOiXx-a8'; // Esta é uma chave pública genérica para testes
 
         const COLORS = {
             blue: { label: 'Azul', solid: 'bg-blue-600' },
@@ -49,15 +43,9 @@
 
         const App = () => {
             const [searchTerm, setSearchTerm] = useState("");
-            
-            // Estados do Google Drive
-            const [isLoggedIn, setIsLoggedIn] = useState(false);
-            const [accessToken, setAccessToken] = useState(null);
-
             const [docs, setDocs] = useState([]);
             const [loading, setLoading] = useState(true);
 
-            // Estados do Modal
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingId, setEditingId] = useState(null);
             const [newTitle, setNewTitle] = useState("");
@@ -69,23 +57,7 @@
             const [attachedFileName, setAttachedFileName] = useState("");
             const fileInputRef = useRef(null);
 
-            // --- INICIALIZAR GOOGLE ---
-            useEffect(() => {
-                // Carrega a biblioteca do Google
-                const script = document.createElement('script');
-                script.src = 'https://apis.google.com/js/api.js';
-                script.onload = () => {
-                    window.gapi.load('client:auth2', () => {
-                        window.gapi.client.init({
-                            clientId: GOOGLE_CLIENT_ID,
-                            scope: 'https://www.googleapis.com/auth/drive.file'
-                        });
-                    });
-                };
-                document.body.appendChild(script);
-            }, []);
-
-            // --- CARREGAR DOCUMENTOS DO SUPABASE ---
+            // --- CARREGAR DOCUMENTOS ---
             const loadDocuments = async () => {
                 setLoading(true);
                 const { data, error } = await supabase
@@ -94,7 +66,6 @@
                     .order('id', { ascending: false });
 
                 if (error) {
-                    console.error("Erro ao buscar:", error);
                     setDocs([]);
                 } else {
                     const formattedData = data.map(item => ({
@@ -106,7 +77,7 @@
                         labels: ['#importante'],
                         colorKey: item.color_key || 'blue',
                         fileAttachment: item.file_name || null,
-                        googleFileId: item.google_file_id || null // O ID real do Google Drive
+                        file_url: item.file_url || null // Novo campo: URL do Supabase Storage
                     }));
                     setDocs(formattedData);
                 }
@@ -117,72 +88,39 @@
                 loadDocuments();
             }, []);
 
-            // --- FUNÇÃO PARA CONECTAR AO GOOGLE DRIVE ---
-            const handleGoogleLogin = () => {
-                window.gapi.auth2.getAuthInstance().signIn().then((googleUser) => {
-                    const token = googleUser.getAuthResponse().access_token;
-                    setAccessToken(token);
-                    setIsLoggedIn(true);
-                    alert("Conectado ao Google Drive com sucesso!");
-                }).catch((err) => {
-                    console.error("Erro no login", err);
-                    alert("Falha ao conectar. Verifique as permissões no Google Cloud.");
-                });
-            };
-
-            // --- FUNÇÃO PARA FAZER UPLOAD DO ARQUIVO ---
-            const uploadFileToDrive = async (file) => {
-                if (!accessToken) {
-                    alert("Por favor, conecte ao Google Drive primeiro.");
-                    return null;
-                }
-
-                const formData = new FormData();
-                const metadata = {
-                    name: file.name,
-                    parents: ['appDataFolder'] // Cria uma pasta oculta no Drive do usuário
-                };
+            // --- UPLOAD PARA O STORAGE DO SUPABASE ---
+            const uploadFileToSupabase = async (file) => {
+                // Cria um nome único para o arquivo para não sobrescrever
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
                 
-                // Cria um blob com os metadados
-                const metadataBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
-                formData.append('metadata', metadataBlob);
-                formData.append('file', file);
+                const { data, error } = await supabase.storage
+                    .from('arquivos') // Nome do seu bucket
+                    .upload(fileName, file);
 
-                try {
-                    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-                        method: 'POST',
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`,
-                        },
-                        body: formData
-                    });
-
-                    const data = await response.json();
-                    if (data.id) {
-                        return data.id; // Retorna o ID do arquivo no Google Drive
-                    } else {
-                        console.error("Erro no upload:", data);
-                        return null;
-                    }
-                } catch (error) {
-                    console.error("Erro na requisição:", error);
+                if (error) {
+                    console.error("Erro no upload para o Supabase:", error);
                     return null;
                 }
+
+                // Gera o link público do arquivo
+                const { data: urlData } = supabase.storage
+                    .from('arquivos')
+                    .getPublicUrl(fileName);
+                    
+                return urlData.publicUrl;
             };
 
             // --- DELETAR DOCUMENTO ---
             const handleDeleteDocument = async (id, title) => {
                 if (!confirm(`Tem certeza que deseja excluir "${title}"?`)) return;
                 const { error } = await supabase.from('documents').delete().eq('id', id);
-                if (error) {
-                    alert("Erro ao excluir.");
-                    console.error(error);
-                } else {
+                if (!error) {
                     setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
                 }
             };
 
-            // --- ABRIR MODAL ---
+            // --- ABRIR E FECHAR MODAL ---
             const openCreateModal = () => {
                 setEditingId(null);
                 setNewTitle(""); setNewDesc(""); setNewColor("blue");
@@ -214,7 +152,7 @@
                 }
             };
 
-            // --- SALVAR (CRIAR OU EDITAR) ---
+            // --- SALVAR DOCUMENTO ---
             const handleSaveDocument = async () => {
                 if (!newTitle.trim()) {
                     alert("Por favor, digite um título.");
@@ -222,11 +160,15 @@
                 }
                 setIsSaving(true);
 
-                let googleFileId = null;
+                let fileUrl = null;
 
-                // Se tiver um arquivo novo anexado e estiver logado, faz o upload para o Google Drive
-                if (attachedFile && isLoggedIn) {
-                    googleFileId = await uploadFileToDrive(attachedFile);
+                if (attachedFile) {
+                    fileUrl = await uploadFileToSupabase(attachedFile);
+                    if (!fileUrl) {
+                        alert("Falha ao fazer upload do arquivo.");
+                        setIsSaving(false);
+                        return;
+                    }
                 }
 
                 const docData = { 
@@ -234,38 +176,29 @@
                     description: newDesc.trim() || "Sem descrição.",
                     color_key: newColor,
                     file_name: attachedFileName || null,
-                    google_file_id: googleFileId // Salva o ID real do Google Drive no Supabase
+                    file_url: fileUrl // Salva a URL direta do arquivo
                 };
 
                 let error;
-
                 if (editingId) {
-                    const { error: updateError } = await supabase
-                        .from('documents')
-                        .update(docData)
-                        .eq('id', editingId);
+                    const { error: updateError } = await supabase.from('documents').update(docData).eq('id', editingId);
                     error = updateError;
                 } else {
-                    const { error: insertError } = await supabase
-                        .from('documents')
-                        .insert(docData);
+                    const { error: insertError } = await supabase.from('documents').insert(docData);
                     error = insertError;
                 }
 
                 setIsSaving(false);
-
-                if (error) {
-                    alert("Erro ao salvar no banco.");
-                    console.error(error);
-                } else {
+                if (!error) {
                     closeModal();
                     loadDocuments();
+                } else {
+                    alert("Erro ao salvar no banco.");
                 }
             };
 
             return (
                 <div className="flex flex-col h-screen bg-[#f3f4f6] overflow-hidden relative">
-                    
                     <header className="bg-[#1e2d43] text-white px-6 py-4 flex items-center justify-between shrink-0 shadow-sm">
                         <div className="flex items-center gap-4">
                             <div className="text-[#FF9900] text-2xl"><i className="fas fa-folder-open"></i></div>
@@ -275,9 +208,6 @@
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <button onClick={handleGoogleLogin} className="border border-gray-400 hover:border-white px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-2">
-                                <i className="fab fa-google-drive text-blue-400"></i> {isLoggedIn ? "Drive Conectado" : "Conectar"}
-                            </button>
                             <button onClick={openCreateModal} className="bg-[#FF9900] hover:bg-[#e88d00] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 transition-colors">
                                 <i className="fas fa-plus"></i> Novo
                             </button>
@@ -296,19 +226,6 @@
                             </div>
                         </div>
 
-                        <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between mb-6 shadow-sm">
-                            <div className="flex items-center gap-3">
-                                <i className="fas fa-cloud text-gray-400 text-xl"></i>
-                                <div>
-                                    <h3 className="font-bold text-gray-800 text-sm">Armazenamento na Nuvem</h3>
-                                    <p className="text-xs text-gray-500">Arquivos salvos no seu Google Drive.</p>
-                                </div>
-                            </div>
-                            <button onClick={handleGoogleLogin} className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-full text-xs font-semibold transition-colors border border-gray-700">
-                                <i className="fab fa-google-drive mr-2"></i> {isLoggedIn ? "Conectado" : "Conectar Google Drive"}
-                            </button>
-                        </div>
-
                         <div className="flex gap-6 h-full">
                             <aside className="w-64 shrink-0 bg-white rounded-xl p-4 border border-gray-200 shadow-sm h-fit">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 border-b pb-3 mb-3">Filtros</h3>
@@ -324,159 +241,96 @@
                                 <div className="flex items-center justify-between mb-6">
                                     <h2 className="text-base font-bold text-gray-800">Documentos</h2>
                                 </div>
-                                
-                                {loading && (
-                                    <div className="flex justify-center py-10">
-                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div>
-                                    </div>
-                                )}
-
+                                {loading && <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div></div>}
                                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                                    {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => {
-                                        const colorStyles = COLORS[doc.colorKey] || COLORS['blue'];
-                                        const solidBg = colorStyles.solid;
-                                        
-                                        return (
-                                            <div key={doc.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-[#FF9900] hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col h-full relative">
-                                                <div className="flex items-start justify-between mb-3">
-                                                    <div className="flex gap-2 flex-wrap">
-                                                        {doc.tags.map((tag, i) => (
-                                                            <span key={i} className="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-medium px-2 py-0.5 rounded-md">{tag}</span>
-                                                        ))}
-                                                    </div>
-                                                    <div className="flex items-center gap-1 text-gray-400 text-[10px] font-medium">{doc.date}</div>
+                                    {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => (
+                                        <div key={doc.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-[#FF9900] hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col h-full relative">
+                                            <div className="flex items-start justify-between mb-3">
+                                                <div className="flex gap-2 flex-wrap">
+                                                    {doc.tags.map((tag, i) => (<span key={i} className="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-medium px-2 py-0.5 rounded-md">{tag}</span>))}
                                                 </div>
-                                                <h3 className="text-sm font-bold text-gray-800 mb-1 leading-tight">{doc.title}</h3>
-                                                <p className="text-xs text-gray-500 leading-relaxed mb-4 flex-1 line-clamp-2">{doc.desc}</p>
-                                                
-                                                <div className={`${solidBg} rounded-lg p-4 text-white mb-4 text-center shadow-sm w-full flex flex-col justify-center`} style={{ aspectRatio: '16/9' }}>
-                                                    <p className="font-bold text-sm tracking-wide">{doc.title.toUpperCase()}</p>
-                                                    <p className="text-[10px] opacity-90 mt-1">{doc.desc}</p>
+                                                <div className="flex items-center gap-1 text-gray-400 text-[10px] font-medium">{doc.date}</div>
+                                            </div>
+                                            <h3 className="text-sm font-bold text-gray-800 mb-1 leading-tight">{doc.title}</h3>
+                                            <p className="text-xs text-gray-500 leading-relaxed mb-4 flex-1 line-clamp-2">{doc.desc}</p>
+                                            <div className={`${COLORS[doc.colorKey].solid} rounded-lg p-4 text-white mb-4 text-center shadow-sm w-full flex flex-col justify-center`} style={{ aspectRatio: '16/9' }}>
+                                                <p className="font-bold text-sm tracking-wide">{doc.title.toUpperCase()}</p>
+                                                <p className="text-[10px] opacity-90 mt-1">{doc.desc}</p>
+                                            </div>
+                                            
+                                            {/* LINK DO SUPABASE STORAGE - ABRE DIRETO NO NAVEGADOR */}
+                                            {doc.fileAttachment && (
+                                                <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => {
+                                                    if(doc.file_url) window.open(doc.file_url, '_blank');
+                                                    else alert("Arquivo sem URL salva.");
+                                                }}>
+                                                    <i className="fas fa-paperclip text-blue-500"></i>
+                                                    <span className="text-xs text-gray-600 truncate flex-1">{doc.fileAttachment}</span>
+                                                    <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 px-1.5 rounded">Abrir</span>
                                                 </div>
-                                                
-                                                {doc.fileAttachment && (
-                                                    <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => {
-                                                        if(doc.googleFileId) {
-                                                            window.open(`https://drive.google.com/file/d/${doc.googleFileId}/view`, '_blank');
-                                                        } else {
-                                                            alert("Esse arquivo foi salvo apenas com o nome, sem upload real para o Drive.");
-                                                        }
-                                                    }}>
-                                                        <i className="fas fa-paperclip text-blue-500"></i>
-                                                        <span className="text-xs text-gray-600 truncate flex-1">{doc.fileAttachment}</span>
-                                                        <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 px-1.5 rounded">Abrir</span>
-                                                    </div>
-                                                )}
+                                            )}
 
-                                                <div className="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
-                                                    <div className="flex gap-2">
-                                                        {doc.labels.map((label, i) => (
-                                                            <span key={i} className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-2 py-0.5 rounded-full">{label}</span>
-                                                        ))}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-gray-400">
-                                                        <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); openEditModal(doc); }}></i>
-                                                        <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
-                                                    </div>
+                                            <div className="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
+                                                <div className="flex gap-2">
+                                                    {doc.labels.map((label, i) => (<span key={i} className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-2 py-0.5 rounded-full">{label}</span>))}
+                                                </div>
+                                                <div className="flex items-center gap-2 text-gray-400">
+                                                    <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); openEditModal(doc); }}></i>
+                                                    <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
                                 </div>
                             </main>
                         </div>
                     </div>
 
-                    {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
+                    {/* MODAL */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-enter">
                                 <div className="flex justify-between items-center p-6 border-b border-gray-100">
-                                    <h3 className="text-lg font-bold text-gray-800">
-                                        {editingId ? 'Editar Documento' : 'Novo Documento'}
-                                    </h3>
-                                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors">
-                                        <i className="fas fa-times text-xl"></i>
-                                    </button>
+                                    <h3 className="text-lg font-bold text-gray-800">{editingId ? 'Editar Documento' : 'Novo Documento'}</h3>
+                                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors"><i className="fas fa-times text-xl"></i></button>
                                 </div>
-
                                 <div className="p-6 space-y-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
-                                        <input 
-                                            type="text" 
-                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all"
-                                            value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus
-                                        />
+                                        <input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                        <textarea 
-                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20"
-                                            value={newDesc} onChange={(e) => setNewDesc(e.target.value)}
-                                        ></textarea>
+                                        <textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}></textarea>
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Anexar Arquivo (PDF, Imagem...)</label>
-                                        <input 
-                                            type="file" 
-                                            ref={fileInputRef} 
-                                            onChange={handleFileChange}
-                                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                                        />
-                                        <div 
-                                            onClick={triggerFileUpload}
-                                            className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 hover:border-[#FF9900] transition-colors flex flex-col items-center gap-1"
-                                        >
+                                        <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" />
+                                        <div onClick={triggerFileUpload} className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 hover:border-[#FF9900] transition-colors flex flex-col items-center gap-1">
                                             <i className="fas fa-cloud-upload-alt text-gray-400 text-xl"></i>
-                                            <span className="text-xs text-gray-500 font-medium">
-                                                {attachedFileName ? `Anexado: ${attachedFileName}` : 'Clique para selecionar um arquivo'}
-                                            </span>
+                                            <span className="text-xs text-gray-500 font-medium">{attachedFileName ? `Anexado: ${attachedFileName}` : 'Clique para selecionar um arquivo'}</span>
                                         </div>
-                                        {!isLoggedIn && (
-                                            <p className="text-xs text-amber-600 mt-2 text-center">
-                                                <i className="fas fa-exclamation-triangle mr-1"></i> Conecte ao Google Drive antes de salvar para anexar o arquivo.
-                                            </p>
-                                        )}
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Cor do Destaque</label>
                                         <div className="flex gap-3">
                                             {Object.entries(COLORS).map(([key, color]) => (
-                                                <button 
-                                                    key={key} onClick={() => setNewColor(key)}
-                                                    className={`w-10 h-10 rounded-full border-2 transition-all flex items-center justify-center ${color.solid} ${newColor === key ? 'border-black scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}
-                                                >
+                                                <button key={key} onClick={() => setNewColor(key)} className={`w-10 h-10 rounded-full border-2 transition-all flex items-center justify-center ${color.solid} ${newColor === key ? 'border-black scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}>
                                                     {newColor === key && <i className="fas fa-check text-white text-xs"></i>}
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
                                 </div>
-
                                 <div className="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
-                                    <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">
-                                        Cancelar
-                                    </button>
-                                    <button 
-                                        onClick={handleSaveDocument} 
-                                        disabled={isSaving}
-                                        className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-2 ${isSaving ? 'bg-[#d97700] cursor-not-allowed' : 'bg-[#FF9900] hover:bg-[#e88d00]'}`}
-                                    >
-                                        {isSaving ? (
-                                            <>
-                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                                                Salvando...
-                                            </>
-                                        ) : (editingId ? 'Salvar Alterações' : 'Salvar Documento')}
+                                    <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+                                    <button onClick={handleSaveDocument} disabled={isSaving} className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-2 ${isSaving ? 'bg-[#d97700] cursor-not-allowed' : 'bg-[#FF9900] hover:bg-[#e88d00]'}`}>
+                                        {isSaving ? (<><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div> Salvando...</>) : (editingId ? 'Salvar Alterações' : 'Salvar Documento')}
                                     </button>
                                 </div>
                             </div>
                         </div>
                     )}
-
                 </div>
             );
         };
