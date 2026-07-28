@@ -66,6 +66,7 @@
                     .order('id', { ascending: false });
 
                 if (error) {
+                    console.error("Erro ao buscar documentos:", error);
                     setDocs([]);
                 } else {
                     const formattedData = data.map(item => ({
@@ -77,7 +78,7 @@
                         labels: ['#importante'],
                         colorKey: item.color_key || 'blue',
                         fileAttachment: item.file_name || null,
-                        file_url: item.file_url || null // Novo campo: URL do Supabase Storage
+                        file_url: item.file_url || null
                     }));
                     setDocs(formattedData);
                 }
@@ -90,22 +91,22 @@
 
             // --- UPLOAD PARA O STORAGE DO SUPABASE ---
             const uploadFileToSupabase = async (file) => {
-                // Cria um nome único para o arquivo para não sobrescrever
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
                 
+                // ATENÇÃO AQUI: Certifique-se de que o nome do bucket está igual ao do seu Supabase
                 const { data, error } = await supabase.storage
-                    .from('arquivos') // Nome do seu bucket
+                    .from('PainelDocumentos') // Se criou como 'arquivos', mude aqui!
                     .upload(fileName, file);
 
                 if (error) {
-                    console.error("Erro no upload para o Supabase:", error);
+                    console.error("Erro detalhado do Supabase:", error);
                     return null;
                 }
 
-                // Gera o link público do arquivo
+                // Gera o link público
                 const { data: urlData } = supabase.storage
-                    .from('arquivos')
+                    .from('PainelDocumentos') // Mesmo nome aqui
                     .getPublicUrl(fileName);
                     
                 return urlData.publicUrl;
@@ -165,8 +166,9 @@
                 if (attachedFile) {
                     fileUrl = await uploadFileToSupabase(attachedFile);
                     if (!fileUrl) {
-                        alert("Falha ao fazer upload do arquivo.");
+                        // Se o upload falhou, para o processo e avisa
                         setIsSaving(false);
+                        alert("Falha ao fazer upload do arquivo. Verifique o console do navegador (F12) para detalhes.");
                         return;
                     }
                 }
@@ -176,7 +178,7 @@
                     description: newDesc.trim() || "Sem descrição.",
                     color_key: newColor,
                     file_name: attachedFileName || null,
-                    file_url: fileUrl // Salva a URL direta do arquivo
+                    file_url: fileUrl
                 };
 
                 let error;
@@ -194,6 +196,7 @@
                     loadDocuments();
                 } else {
                     alert("Erro ao salvar no banco.");
+                    console.error("Erro ao inserir no banco:", error);
                 }
             };
 
@@ -258,7 +261,6 @@
                                                 <p className="text-[10px] opacity-90 mt-1">{doc.desc}</p>
                                             </div>
                                             
-                                            {/* LINK DO SUPABASE STORAGE - ABRE DIRETO NO NAVEGADOR */}
                                             {doc.fileAttachment && (
                                                 <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => {
                                                     if(doc.file_url) window.open(doc.file_url, '_blank');
