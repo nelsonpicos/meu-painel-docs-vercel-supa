@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Documentos</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .modal-enter { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden flex flex-col">
+    
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const COLORS = {
+            blue: { label: 'Azul', solid: 'bg-blue-600' },
+            green: { label: 'Verde', solid: 'bg-emerald-500' },
+            amber: { label: 'Amarelo', solid: 'bg-amber-400' }
+        };
+
+        const App = () => {
+            const [searchTerm, setSearchTerm] = useState("");
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [docs, setDocs] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            // Estados do Modal
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingId, setEditingId] = useState(null); // Se tiver ID, é edição. Se for null, é novo.
+            const [newTitle, setNewTitle] = useState("");
+            const [newDesc, setNewDesc] = useState("");
+            const [newColor, setNewColor] = useState("blue");
+            const [isSaving, setIsSaving] = useState(false);
+            
+            const [attachedFile, setAttachedFile] = useState(null);
+            const [attachedFileName, setAttachedFileName] = useState("");
+            const fileInputRef = useRef(null);
+
+            const loadDocuments = async () => {
+                setLoading(true);
+                const { data, error } = await supabase
+                    .from('documents')
+                    .select('*')
+                    .order('id', { ascending: false });
+
+                if (error) {
+                    console.error("Erro ao buscar:", error);
+                    setDocs([]);
+                } else {
+                    const formattedData = data.map(item => ({
+                        id: item.id,
+                        tags: item.tags ? item.tags.split(',').map(t => t.trim()) : ['Geral'],
+                        title: item.title || 'Sem título',
+                        desc: item.description || 'Sem descrição.',
+                        date: new Date(item.created_at).toLocaleDateString('pt-BR'),
+                        labels: ['#importante'],
+                        colorKey: item.color_key || 'blue',
+                        fileAttachment: item.file_name || null
+                    }));
+                    setDocs(formattedData);
+                }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                loadDocuments();
+            }, []);
+
+            // --- FUNÇÃO PARA DELETAR ---
+            const handleDeleteDocument = async (id, title) => {
+                if (!confirm(`Tem certeza que deseja excluir o documento "${title}"?`)) return;
+                const { error } = await supabase.from('documents').delete().eq('id', id);
+                if (error) {
+                    alert("Erro ao excluir.");
+                    console.error(error);
+                } else {
+                    setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
+                }
+            };
+
+            const handleGoogleLogin = () => setIsLoggedIn(true);
+
+            // --- ABRIR MODAL (CRIAR) ---
+            const openCreateModal = () => {
+                setEditingId(null);
+                setNewTitle(""); setNewDesc(""); setNewColor("blue");
+                setAttachedFile(null); setAttachedFileName("");
+                setIsModalOpen(true);
+            };
+
+            // --- ABRIR MODAL (EDITAR) ---
+            const openEditModal = (doc) => {
+                setEditingId(doc.id);
+                setNewTitle(doc.title);
+                setNewDesc(doc.desc);
+                setNewColor(doc.colorKey);
+                setAttachedFileName(doc.fileAttachment || "");
+                setAttachedFile(null); // Para editar, não carregamos o arquivo real, só o nome
+                setIsModalOpen(true);
+            };
+
+            const closeModal = () => {
+                setIsModalOpen(false); setIsSaving(false);
+            };
+
+            const triggerFileUpload = () => fileInputRef.current.click();
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setAttachedFile(file);
+                    setAttachedFileName(file.name);
+                }
+            };
+
+            // --- SALVAR (CRIAR OU EDITAR) ---
+            const handleSaveDocument = async () => {
+                if (!newTitle.trim()) {
+                    alert("Por favor, digite um título.");
+                    return;
+                }
+                setIsSaving(true);
+
+                const docData = { 
+                    title: newTitle.trim(), 
+                    description: newDesc.trim() || "Sem descrição.",
+                    color_key: newColor,
+                    file_name: attachedFileName || null
+                };
+
+                let error;
+
+                if (editingId) {
+                    // --- EDIÇÃO ---
+                    const { error: updateError } = await supabase
+                        .from('documents')
+                        .update(docData)
+                        .eq('id', editingId);
+                    error = updateError;
+                } else {
+                    // --- CRIAÇÃO ---
+                    const { error: insertError } = await supabase
+                        .from('documents')
+                        .insert(docData);
+                    error = insertError;
+                }
+
+                setIsSaving(false);
+
+                if (error) {
+                    alert("Erro ao salvar.");
+                    console.error(error);
+                } else {
+                    closeModal();
+                    loadDocuments();
+                }
+            };
+
+            return (
+                <div className="flex flex-col h-screen bg-[#f3f4f6] overflow-hidden relative">
+                    
+                    <header className="bg-[#1e2d43] text-white px-6 py-4 flex items-center justify-between shrink-0 shadow-sm">
+                        <div className="flex items-center gap-4">
+                            <div className="text-[#FF9900] text-2xl"><i className="fas fa-folder-open"></i></div>
+                            <div>
+                                <h1 className="text-xl font-bold tracking-tight">Painel</h1>
+                                <p className="text-[10px] text-gray-300 font-medium">Sua central de arquivos</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button onClick={handleGoogleLogin} className="border border-gray-400 hover:border-white px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center gap-2">
+                                <i className="fab fa-google-drive text-blue-400"></i> {isLoggedIn ? "Conectado" : "Conectar"}
+                            </button>
+                            <button onClick={openCreateModal} className="bg-[#FF9900] hover:bg-[#e88d00] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 transition-colors">
+                                <i className="fas fa-plus"></i> Novo
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="max-w-3xl mx-auto mb-8 w-full">
+                            <div className="relative group">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <i className="fas fa-search text-gray-400 group-focus-within:text-[#FF9900] transition-colors"></i>
+                                </div>
+                                <input type="text" placeholder="Pesquisar..." 
+                                    className="w-full bg-white border-2 border-gray-300 text-gray-800 pl-11 pr-4 py-3 rounded-xl outline-none transition-all focus:border-[#FF9900] placeholder-gray-400 shadow-sm"
+                                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between mb-6 shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <i className="fas fa-cloud text-gray-400 text-xl"></i>
+                                <div>
+                                    <h3 className="font-bold text-gray-800 text-sm">Armazenamento na Nuvem</h3>
+                                    <p className="text-xs text-gray-500">Conecte sua conta para sincronizar tudo.</p>
+                                </div>
+                            </div>
+                            <button className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-full text-xs font-semibold transition-colors border border-gray-700">
+                                <i className="fab fa-google-drive mr-2"></i> Conectar Google Drive
+                            </button>
+                        </div>
+
+                        <div className="flex gap-6 h-full">
+                            <aside className="w-64 shrink-0 bg-white rounded-xl p-4 border border-gray-200 shadow-sm h-fit">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 border-b pb-3 mb-3">Filtros</h3>
+                                <ul className="space-y-1 mb-4">
+                                    <li className="bg-gray-100 text-gray-900 px-3 py-2 rounded-md flex items-center justify-between cursor-pointer text-sm font-medium border border-gray-200">
+                                        <span className="flex items-center gap-3"><i className="fas fa-folder-open text-[#FF9900]"></i> Todos</span>
+                                        <span className="bg-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{docs.length}</span>
+                                    </li>
+                                </ul>
+                            </aside>
+
+                            <main className="flex-1 bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h2 className="text-base font-bold text-gray-800">Documentos</h2>
+                                </div>
+                                
+                                {loading && (
+                                    <div className="flex justify-center py-10">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div>
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                                    {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => {
+                                        const colorStyles = COLORS[doc.colorKey] || COLORS['blue'];
+                                        const solidBg = colorStyles.solid;
+                                        
+                                        return (
+                                            <div key={doc.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-[#FF9900] hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col h-full relative">
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="flex gap-2 flex-wrap">
+                                                        {doc.tags.map((tag, i) => (
+                                                            <span key={i} className="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-medium px-2 py-0.5 rounded-md">{tag}</span>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-center gap-1 text-gray-400 text-[10px] font-medium">{doc.date}</div>
+                                                </div>
+                                                <h3 className="text-sm font-bold text-gray-800 mb-1 leading-tight">{doc.title}</h3>
+                                                <p className="text-xs text-gray-500 leading-relaxed mb-4 flex-1 line-clamp-2">{doc.desc}</p>
+                                                
+                                                <div className={`${solidBg} rounded-lg p-4 text-white mb-4 text-center shadow-sm w-full flex flex-col justify-center`} style={{ aspectRatio: '16/9' }}>
+                                                    <p className="font-bold text-sm tracking-wide">{doc.title.toUpperCase()}</p>
+                                                    <p className="text-[10px] opacity-90 mt-1">{doc.desc}</p>
+                                                </div>
+                                                
+                                                {doc.fileAttachment && (
+                                                    <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3">
+                                                        <i className="fas fa-paperclip text-blue-500"></i>
+                                                        <span className="text-xs text-gray-600 truncate flex-1">{doc.fileAttachment}</span>
+                                                        <span className="text-[10px] text-gray-400 border border-gray-300 px-1.5 rounded">Anexo</span>
+                                                    </div>
+                                                )}
+
+                                                <div className="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
+                                                    <div className="flex gap-2">
+                                                        {doc.labels.map((label, i) => (
+                                                            <span key={i} className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-2 py-0.5 rounded-full">{label}</span>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-gray-400">
+                                                        {/* LÁPIS DE EDITAR */}
+                                                        <i 
+                                                            className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors" 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                openEditModal(doc);
+                                                            }}
+                                                        ></i>
+                                                        
+                                                        {/* LIXEIRA DE DELETAR */}
+                                                        <i 
+                                                            className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors" 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteDocument(doc.id, doc.title);
+                                                            }}
+                                                        ></i>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </main>
+                        </div>
+                    </div>
+
+                    {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-enter">
+                                <div className="flex justify-between items-center p-6 border-b border-gray-100">
+                                    <h3 className="text-lg font-bold text-gray-800">
+                                        {editingId ? 'Editar Documento' : 'Novo Documento'}
+                                    </h3>
+                                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors">
+                                        <i className="fas fa-times text-xl"></i>
+                                    </button>
+                                </div>
+
+                                <div className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
+                                        <input 
+                                            type="text" 
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all"
+                                            value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                                        <textarea 
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20"
+                                            value={newDesc} onChange={(e) => setNewDesc(e.target.value)}
+                                        ></textarea>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Anexar Arquivo (PDF, Imagem...)</label>
+                                        <input 
+                                            type="file" 
+                                            ref={fileInputRef} 
+                                            onChange={handleFileChange}
+                                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                        />
+                                        <div 
+                                            onClick={triggerFileUpload}
+                                            className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 hover:border-[#FF9900] transition-colors flex flex-col items-center gap-1"
+                                        >
+                                            <i className="fas fa-cloud-upload-alt text-gray-400 text-xl"></i>
+                                            <span className="text-xs text-gray-500 font-medium">
+                                                {attachedFileName ? `Anexado: ${attachedFileName}` : 'Clique para selecionar um arquivo'}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Cor do Destaque</label>
+                                        <div className="flex gap-3">
+                                            {Object.entries(COLORS).map(([key, color]) => (
+                                                <button 
+                                                    key={key} onClick={() => setNewColor(key)}
+                                                    className={`w-10 h-10 rounded-full border-2 transition-all flex items-center justify-center ${color.solid} ${newColor === key ? 'border-black scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}
+                                                >
+                                                    {newColor === key && <i className="fas fa-check text-white text-xs"></i>}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+                                    <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">
+                                        Cancelar
+                                    </button>
+                                    <button 
+                                        onClick={handleSaveDocument} 
+                                        disabled={isSaving}
+                                        className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-2 ${isSaving ? 'bg-[#d97700] cursor-not-allowed' : 'bg-[#FF9900] hover:bg-[#e88d00]'}`}
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                                Salvando...
+                                            </>
+                                        ) : (editingId ? 'Salvar Alterações' : 'Salvar Documento')}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
