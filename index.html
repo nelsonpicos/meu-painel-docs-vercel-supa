@@ -5,11 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Documentos</title>
     
+    <!-- Estilos e Fontes -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- React e Dependências -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
@@ -34,6 +39,7 @@
         const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const STORAGE_BUCKET = 'arquivos'; // Nome do seu bucket (minúsculo)
 
         const COLORS = {
             blue: { label: 'Azul', solid: 'bg-blue-600' },
@@ -91,22 +97,22 @@
 
             // --- UPLOAD PARA O STORAGE DO SUPABASE ---
             const uploadFileToSupabase = async (file) => {
+                // Gera nome único para o arquivo
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
                 
-                // ATENÇÃO AQUI: Certifique-se de que o nome do bucket está igual ao do seu Supabase
                 const { data, error } = await supabase.storage
-                    .from('PainelDocumentos') // Se criou como 'arquivos', mude aqui!
+                    .from(STORAGE_BUCKET)
                     .upload(fileName, file);
 
                 if (error) {
-                    console.error("Erro detalhado do Supabase:", error);
+                    console.error("Erro detalhado do Supabase (Storage):", error);
                     return null;
                 }
 
                 // Gera o link público
                 const { data: urlData } = supabase.storage
-                    .from('PainelDocumentos') // Mesmo nome aqui
+                    .from(STORAGE_BUCKET)
                     .getPublicUrl(fileName);
                     
                 return urlData.publicUrl;
@@ -163,12 +169,12 @@
 
                 let fileUrl = null;
 
+                // Tenta fazer o upload apenas se houver um arquivo selecionado
                 if (attachedFile) {
                     fileUrl = await uploadFileToSupabase(attachedFile);
                     if (!fileUrl) {
-                        // Se o upload falhou, para o processo e avisa
                         setIsSaving(false);
-                        alert("Falha ao fazer upload do arquivo. Verifique o console do navegador (F12) para detalhes.");
+                        alert("Falha ao fazer upload do arquivo. Verifique se o bucket 'arquivos' está Público e com as políticas configuradas.");
                         return;
                     }
                 }
@@ -288,7 +294,7 @@
                         </div>
                     </div>
 
-                    {/* MODAL */}
+                    {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-enter">
