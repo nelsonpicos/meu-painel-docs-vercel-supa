@@ -21,6 +21,15 @@
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
         input[type="file"] { display: none; }
+        
+        /* Animação da Barra de Progresso */
+        @keyframes progressAnimation {
+            0% { width: 0%; }
+            100% { width: 100%; }
+        }
+        .animate-progress {
+            animation: progressAnimation 1.5s ease-in-out forwards;
+        }
     </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col">
@@ -53,6 +62,11 @@
             const [isSaving, setIsSaving] = useState(false);
             const [attachedFile, setAttachedFile] = useState(null);
             const [attachedFileName, setAttachedFileName] = useState("");
+            
+            // Estado para controlar a barra de progresso
+            const [uploadProgress, setUploadProgress] = useState(0);
+            const [isUploading, setIsUploading] = useState(false);
+            
             const fileInputRef = useRef(null);
 
             const loadDocuments = async () => {
@@ -80,13 +94,38 @@
             useEffect(() => { loadDocuments(); }, []);
 
             const uploadFileToSupabase = async (file) => {
+                setIsUploading(true);
+                setUploadProgress(0);
+
+                // Simula barra de progresso chegando a 100% em 1.5 segundos (enquanto a requisição real ocorre)
+                // Isso dá um feedback imediato ao usuário
+                const progressInterval = setInterval(() => {
+                    setUploadProgress(prev => {
+                        if (prev >= 95) {
+                            clearInterval(progressInterval);
+                            return 95;
+                        }
+                        return prev + 10;
+                    });
+                }, 150);
+
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+                
                 const { data, error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, file);
+
+                clearInterval(progressInterval);
+                
                 if (error) {
+                    setUploadProgress(0);
+                    setIsUploading(false);
                     console.error("🚨 ERRO NO STORAGE:", error);
                     return null;
                 }
+
+                setUploadProgress(100);
+                setIsUploading(false);
+
                 const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
                 return urlData.publicUrl;
             };
@@ -99,7 +138,8 @@
 
             const openCreateModal = () => {
                 setEditingId(null); setNewTitle(""); setNewDesc(""); setNewColor("blue");
-                setAttachedFile(null); setAttachedFileName(""); setIsModalOpen(true);
+                setAttachedFile(null); setAttachedFileName(""); setUploadProgress(0); setIsUploading(false);
+                setIsModalOpen(true);
             };
 
             const openEditModal = (doc) => {
@@ -108,22 +148,32 @@
                 setAttachedFile(null); setIsModalOpen(true);
             };
 
-            const closeModal = () => { setIsModalOpen(false); setIsSaving(false); };
+            const closeModal = () => { 
+                setIsModalOpen(false); 
+                setIsSaving(false);
+                setIsUploading(false);
+                setUploadProgress(0);
+            };
+            
             const triggerFileUpload = () => fileInputRef.current.click();
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
-                if (file) { setAttachedFile(file); setAttachedFileName(file.name); }
+                if (file) { 
+                    setAttachedFile(file); 
+                    setAttachedFileName(file.name); 
+                }
             };
 
             const handleSaveDocument = async () => {
                 if (!newTitle.trim()) { alert("Por favor, digite um título."); return; }
                 setIsSaving(true);
                 let fileUrl = null;
+                
                 if (attachedFile) {
                     fileUrl = await uploadFileToSupabase(attachedFile);
                     if (!fileUrl) {
                         setIsSaving(false);
-                        alert("Falha ao fazer upload do arquivo. Verifique o Console (F12).");
+                        alert("Falha ao fazer upload do arquivo.");
                         return;
                     }
                 }
@@ -149,8 +199,8 @@
                 if (!error) {
                     closeModal(); loadDocuments();
                 } else {
-                    console.error("🚨 ERRO NO BANCO DE DADOS (DB):", error);
-                    alert("Erro ao salvar no banco. Verifique o console (F12) para detalhes exatos do erro.");
+                    console.error("🚨 ERRO NO BANCO (DB):", error);
+                    alert("Erro ao salvar no banco.");
                 }
             };
 
@@ -214,6 +264,7 @@
                         </div>
                     </div>
 
+                    {/* MODAL COM FEEDBACK VISUAL DE UPLOAD */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-enter">
@@ -224,14 +275,35 @@
                                 <div className="p-6 space-y-4">
                                     <div><label className="block text-sm font-medium text-gray-700 mb-1">Título</label><input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus /></div>
                                     <div><label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label><textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}></textarea></div>
+                                    
+                                    {/* ÁREA DE UPLOAD COM CORES E BARRA DE PROGRESSO */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Anexar Arquivo (PDF, Imagem...)</label>
                                         <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" />
-                                        <div onClick={triggerFileUpload} className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 hover:border-[#FF9900] transition-colors flex flex-col items-center gap-1">
-                                            <i className="fas fa-cloud-upload-alt text-gray-400 text-xl"></i>
-                                            <span className="text-xs text-gray-500 font-medium">{attachedFileName ? `Anexado: ${attachedFileName}` : 'Clique para selecionar um arquivo'}</span>
+                                        <div 
+                                            onClick={triggerFileUpload}
+                                            className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-all duration-300 flex flex-col items-center gap-1
+                                                ${attachedFileName ? 'border-[#FF9900] bg-orange-50' : 'border-gray-300 hover:border-[#FF9900] hover:bg-gray-50'}`}
+                                        >
+                                            {/* Ícone da nuvem mudando de cor */}
+                                            <i className={`fas fa-cloud-upload-alt text-xl transition-colors duration-300 ${attachedFileName ? 'text-[#FF9900]' : 'text-gray-400'}`}></i>
+                                            
+                                            <span className={`text-xs font-medium ${attachedFileName ? 'text-[#FF9900]' : 'text-gray-500'}`}>
+                                                {attachedFileName ? `Anexado: ${attachedFileName}` : 'Clique para selecionar um arquivo'}
+                                            </span>
+
+                                            {/* Barra de Progresso (Só aparece se estiver fazendo upload) */}
+                                            {isUploading && (
+                                                <div className="w-full mt-3">
+                                                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                                                        <div className="bg-[#FF9900] h-2.5 rounded-full animate-progress" style={{ width: '0%' }}></div>
+                                                    </div>
+                                                    <p className="text-[10px] text-gray-400 mt-1">Enviando arquivo...</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
+
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Cor do Destaque</label>
                                         <div className="flex gap-3">
@@ -244,7 +316,7 @@
                                 <div className="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
                                     <button onClick={closeModal} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
                                     <button onClick={handleSaveDocument} disabled={isSaving} className={`px-4 py-2 text-sm font-bold text-white rounded-lg transition-colors flex items-center gap-2 ${isSaving ? 'bg-[#d97700] cursor-not-allowed' : 'bg-[#FF9900] hover:bg-[#e88d00]'}`}>
-                                        {isSaving ? (<><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div> Salvando...</>) : (editingId ? 'Salvar Alterações' : 'Salvar Documento')}
+                                        {isSaving ? (<><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div> {isUploading ? 'Enviando...' : 'Salvando...'}</>) : (editingId ? 'Salvar Alterações' : 'Salvar Documento')}
                                     </button>
                                 </div>
                             </div>
