@@ -5,16 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Documentos</title>
     
-    <!-- Estilos e Fontes -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
-    <!-- React e Dependências -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
@@ -35,12 +30,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- CONFIGURAÇÕES SUPABASE ---
         const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        
-        // Nome do bucket em minúsculo para garantir compatibilidade
         const STORAGE_BUCKET = 'arquivos';
 
         const COLORS = {
@@ -53,28 +45,20 @@
             const [searchTerm, setSearchTerm] = useState("");
             const [docs, setDocs] = useState([]);
             const [loading, setLoading] = useState(true);
-
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingId, setEditingId] = useState(null);
             const [newTitle, setNewTitle] = useState("");
             const [newDesc, setNewDesc] = useState("");
             const [newColor, setNewColor] = useState("blue");
             const [isSaving, setIsSaving] = useState(false);
-            
             const [attachedFile, setAttachedFile] = useState(null);
             const [attachedFileName, setAttachedFileName] = useState("");
             const fileInputRef = useRef(null);
 
-            // --- CARREGAR DOCUMENTOS ---
             const loadDocuments = async () => {
                 setLoading(true);
-                const { data, error } = await supabase
-                    .from('documents')
-                    .select('*')
-                    .order('id', { ascending: false });
-
+                const { data, error } = await supabase.from('documents').select('*').order('id', { ascending: false });
                 if (error) {
-                    console.error("Erro ao buscar documentos:", error);
                     setDocs([]);
                 } else {
                     const formattedData = data.map(item => ({
@@ -93,89 +77,53 @@
                 setLoading(false);
             };
 
-            useEffect(() => {
-                loadDocuments();
-            }, []);
+            useEffect(() => { loadDocuments(); }, []);
 
-            // --- UPLOAD PARA O STORAGE DO SUPABASE ---
             const uploadFileToSupabase = async (file) => {
-                // Gera nome único para o arquivo
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-                
-                const { data, error } = await supabase.storage
-                    .from(STORAGE_BUCKET)
-                    .upload(fileName, file);
-
+                const { data, error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, file);
                 if (error) {
-                    console.error("Erro detalhado do Supabase (Storage):", error);
+                    console.error("🚨 ERRO NO STORAGE:", error);
                     return null;
                 }
-
-                // Gera o link público
-                const { data: urlData } = supabase.storage
-                    .from(STORAGE_BUCKET)
-                    .getPublicUrl(fileName);
-                    
+                const { data: urlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
                 return urlData.publicUrl;
             };
 
-            // --- DELETAR DOCUMENTO ---
             const handleDeleteDocument = async (id, title) => {
                 if (!confirm(`Tem certeza que deseja excluir "${title}"?`)) return;
                 const { error } = await supabase.from('documents').delete().eq('id', id);
-                if (!error) {
-                    setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
-                }
+                if (!error) setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
             };
 
-            // --- ABRIR E FECHAR MODAL ---
             const openCreateModal = () => {
-                setEditingId(null);
-                setNewTitle(""); setNewDesc(""); setNewColor("blue");
-                setAttachedFile(null); setAttachedFileName("");
-                setIsModalOpen(true);
+                setEditingId(null); setNewTitle(""); setNewDesc(""); setNewColor("blue");
+                setAttachedFile(null); setAttachedFileName(""); setIsModalOpen(true);
             };
 
             const openEditModal = (doc) => {
-                setEditingId(doc.id);
-                setNewTitle(doc.title);
-                setNewDesc(doc.desc);
-                setNewColor(doc.colorKey);
-                setAttachedFileName(doc.fileAttachment || "");
-                setAttachedFile(null);
-                setIsModalOpen(true);
+                setEditingId(doc.id); setNewTitle(doc.title); setNewDesc(doc.desc);
+                setNewColor(doc.colorKey); setAttachedFileName(doc.fileAttachment || "");
+                setAttachedFile(null); setIsModalOpen(true);
             };
 
-            const closeModal = () => {
-                setIsModalOpen(false); setIsSaving(false);
-            };
-
+            const closeModal = () => { setIsModalOpen(false); setIsSaving(false); };
             const triggerFileUpload = () => fileInputRef.current.click();
-
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
-                if (file) {
-                    setAttachedFile(file);
-                    setAttachedFileName(file.name);
-                }
+                if (file) { setAttachedFile(file); setAttachedFileName(file.name); }
             };
 
-            // --- SALVAR DOCUMENTO ---
             const handleSaveDocument = async () => {
-                if (!newTitle.trim()) {
-                    alert("Por favor, digite um título.");
-                    return;
-                }
+                if (!newTitle.trim()) { alert("Por favor, digite um título."); return; }
                 setIsSaving(true);
-
                 let fileUrl = null;
-
                 if (attachedFile) {
                     fileUrl = await uploadFileToSupabase(attachedFile);
                     if (!fileUrl) {
                         setIsSaving(false);
-                        alert("Falha ao fazer upload do arquivo. Verifique o Console (F12) para detalhes.");
+                        alert("Falha ao fazer upload do arquivo. Verifique o Console (F12).");
                         return;
                     }
                 }
@@ -199,11 +147,10 @@
 
                 setIsSaving(false);
                 if (!error) {
-                    closeModal();
-                    loadDocuments();
+                    closeModal(); loadDocuments();
                 } else {
-                    alert("Erro ao salvar no banco.");
-                    console.error("Erro ao inserir no banco:", error);
+                    console.error("🚨 ERRO NO BANCO DE DADOS (DB):", error);
+                    alert("Erro ao salvar no banco. Verifique o console (F12) para detalhes exatos do erro.");
                 }
             };
 
@@ -212,77 +159,49 @@
                     <header className="bg-[#1e2d43] text-white px-6 py-4 flex items-center justify-between shrink-0 shadow-sm">
                         <div className="flex items-center gap-4">
                             <div className="text-[#FF9900] text-2xl"><i className="fas fa-folder-open"></i></div>
-                            <div>
-                                <h1 className="text-xl font-bold tracking-tight">Painel</h1>
-                                <p className="text-[10px] text-gray-300 font-medium">Sua central de arquivos</p>
-                            </div>
+                            <div><h1 className="text-xl font-bold tracking-tight">Painel</h1><p className="text-[10px] text-gray-300 font-medium">Sua central de arquivos</p></div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <button onClick={openCreateModal} className="bg-[#FF9900] hover:bg-[#e88d00] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 transition-colors">
-                                <i className="fas fa-plus"></i> Novo
-                            </button>
+                            <button onClick={openCreateModal} className="bg-[#FF9900] hover:bg-[#e88d00] text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 transition-colors"><i className="fas fa-plus"></i> Novo</button>
                         </div>
                     </header>
 
                     <div className="flex-1 overflow-y-auto p-6">
                         <div className="max-w-3xl mx-auto mb-8 w-full">
                             <div className="relative group">
-                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                    <i className="fas fa-search text-gray-400 group-focus-within:text-[#FF9900] transition-colors"></i>
-                                </div>
-                                <input type="text" placeholder="Pesquisar..." 
-                                    className="w-full bg-white border-2 border-gray-300 text-gray-800 pl-11 pr-4 py-3 rounded-xl outline-none transition-all focus:border-[#FF9900] placeholder-gray-400 shadow-sm"
-                                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><i className="fas fa-search text-gray-400 group-focus-within:text-[#FF9900] transition-colors"></i></div>
+                                <input type="text" placeholder="Pesquisar..." className="w-full bg-white border-2 border-gray-300 text-gray-800 pl-11 pr-4 py-3 rounded-xl outline-none transition-all focus:border-[#FF9900] placeholder-gray-400 shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                             </div>
                         </div>
-
                         <div className="flex gap-6 h-full">
                             <aside className="w-64 shrink-0 bg-white rounded-xl p-4 border border-gray-200 shadow-sm h-fit">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 border-b pb-3 mb-3">Filtros</h3>
                                 <ul className="space-y-1 mb-4">
-                                    <li className="bg-gray-100 text-gray-900 px-3 py-2 rounded-md flex items-center justify-between cursor-pointer text-sm font-medium border border-gray-200">
-                                        <span className="flex items-center gap-3"><i className="fas fa-folder-open text-[#FF9900]"></i> Todos</span>
-                                        <span className="bg-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{docs.length}</span>
-                                    </li>
+                                    <li className="bg-gray-100 text-gray-900 px-3 py-2 rounded-md flex items-center justify-between cursor-pointer text-sm font-medium border border-gray-200"><span className="flex items-center gap-3"><i className="fas fa-folder-open text-[#FF9900]"></i> Todos</span><span className="bg-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{docs.length}</span></li>
                                 </ul>
                             </aside>
-
                             <main className="flex-1 bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
-                                <div className="flex items-center justify-between mb-6">
-                                    <h2 className="text-base font-bold text-gray-800">Documentos</h2>
-                                </div>
+                                <div className="flex items-center justify-between mb-6"><h2 className="text-base font-bold text-gray-800">Documentos</h2></div>
                                 {loading && <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div></div>}
                                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                                     {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => (
                                         <div key={doc.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-[#FF9900] hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col h-full relative">
                                             <div className="flex items-start justify-between mb-3">
-                                                <div className="flex gap-2 flex-wrap">
-                                                    {doc.tags.map((tag, i) => (<span key={i} className="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-medium px-2 py-0.5 rounded-md">{tag}</span>))}
-                                                </div>
+                                                <div className="flex gap-2 flex-wrap">{doc.tags.map((tag, i) => (<span key={i} className="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-medium px-2 py-0.5 rounded-md">{tag}</span>))}</div>
                                                 <div className="flex items-center gap-1 text-gray-400 text-[10px] font-medium">{doc.date}</div>
                                             </div>
                                             <h3 className="text-sm font-bold text-gray-800 mb-1 leading-tight">{doc.title}</h3>
                                             <p className="text-xs text-gray-500 leading-relaxed mb-4 flex-1 line-clamp-2">{doc.desc}</p>
-                                            <div className={`${COLORS[doc.colorKey].solid} rounded-lg p-4 text-white mb-4 text-center shadow-sm w-full flex flex-col justify-center`} style={{ aspectRatio: '16/9' }}>
-                                                <p className="font-bold text-sm tracking-wide">{doc.title.toUpperCase()}</p>
-                                                <p className="text-[10px] opacity-90 mt-1">{doc.desc}</p>
-                                            </div>
-                                            
+                                            <div className={`${COLORS[doc.colorKey].solid} rounded-lg p-4 text-white mb-4 text-center shadow-sm w-full flex flex-col justify-center`} style={{ aspectRatio: '16/9' }}><p className="font-bold text-sm tracking-wide">{doc.title.toUpperCase()}</p><p className="text-[10px] opacity-90 mt-1">{doc.desc}</p></div>
                                             {doc.fileAttachment && (
-                                                <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => {
-                                                    if(doc.file_url) window.open(doc.file_url, '_blank');
-                                                    else alert("Arquivo sem URL salva.");
-                                                }}>
+                                                <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => { if(doc.file_url) window.open(doc.file_url, '_blank'); else alert("Arquivo sem URL salva."); }}>
                                                     <i className="fas fa-paperclip text-blue-500"></i>
                                                     <span className="text-xs text-gray-600 truncate flex-1">{doc.fileAttachment}</span>
                                                     <span className="text-[10px] text-blue-600 border border-blue-200 bg-blue-50 px-1.5 rounded">Abrir</span>
                                                 </div>
                                             )}
-
                                             <div className="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
-                                                <div className="flex gap-2">
-                                                    {doc.labels.map((label, i) => (<span key={i} className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-2 py-0.5 rounded-full">{label}</span>))}
-                                                </div>
+                                                <div className="flex gap-2">{doc.labels.map((label, i) => (<span key={i} className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-2 py-0.5 rounded-full">{label}</span>))}</div>
                                                 <div className="flex items-center gap-2 text-gray-400">
                                                     <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); openEditModal(doc); }}></i>
                                                     <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
@@ -295,7 +214,6 @@
                         </div>
                     </div>
 
-                    {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden modal-enter">
@@ -304,14 +222,8 @@
                                     <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors"><i className="fas fa-times text-xl"></i></button>
                                 </div>
                                 <div className="p-6 space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Título</label>
-                                        <input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                        <textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}></textarea>
-                                    </div>
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Título</label><input type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus /></div>
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label><textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-20" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}></textarea></div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Anexar Arquivo (PDF, Imagem...)</label>
                                         <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" />
@@ -324,9 +236,7 @@
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Cor do Destaque</label>
                                         <div className="flex gap-3">
                                             {Object.entries(COLORS).map(([key, color]) => (
-                                                <button key={key} onClick={() => setNewColor(key)} className={`w-10 h-10 rounded-full border-2 transition-all flex items-center justify-center ${color.solid} ${newColor === key ? 'border-black scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}>
-                                                    {newColor === key && <i className="fas fa-check text-white text-xs"></i>}
-                                                </button>
+                                                <button key={key} onClick={() => setNewColor(key)} className={`w-10 h-10 rounded-full border-2 transition-all flex items-center justify-center ${color.solid} ${newColor === key ? 'border-black scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}>{newColor === key && <i className="fas fa-check text-white text-xs"></i>}</button>
                                             ))}
                                         </div>
                                     </div>
