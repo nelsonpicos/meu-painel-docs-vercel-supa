@@ -135,7 +135,7 @@
         };
 
         // --- COMPONENTE EDITOR DE TEXTO VISUAL ---
-        const VisualEditor = ({ value, onChange, onUploadImage }) => {
+        const VisualEditor = ({ value, onChange }) => {
             const editor = useMemo(() => withReact(createEditor()), []);
             const [editorValue, setEditorValue] = useState(value);
 
@@ -152,11 +152,11 @@
             const renderElement = useCallback(props => {
                 switch (props.element.type) {
                     case 'image':
-                        return <ImageElement {...props} onUploadImage={onUploadImage} />;
+                        return <ImageElement {...props} />;
                     default:
                         return <DefaultElement {...props} />;
                 }
-            }, [onUploadImage]);
+            }, []);
 
             return (
                 <Slate editor={editor} value={editorValue} onChange={handleChange}>
@@ -219,7 +219,7 @@
                         desc: item.description || 'Sem descrição.',
                         date: new Date(item.created_at).toLocaleDateString('pt-BR'),
                         labels: ['#importante'],
-                        colorKey: item.color_key || 'yellow',
+                        colorKey: item.color_key || 'yellow', // Garante a cor
                         fileAttachment: item.file_name || null,
                         file_url: item.file_url || null
                     }));
@@ -276,17 +276,8 @@
                 }
             };
 
-            // --- LÓGICA DO EDITOR VISUAL ---
             const handleEditorChange = (text) => {
                 setNewDesc(text);
-            };
-
-            const handleEditorImageUpload = async (file) => {
-                const url = await uploadFileToSupabase(file);
-                if (url) {
-                    // A inserção é feita automaticamente pelo Slate
-                    // O App renderiza o visual e salva o texto real
-                }
             };
 
             const renderDescription = (text) => {
@@ -345,6 +336,7 @@
                     }
                 }
 
+                // Incluindo 'color_key' nos dados enviados para o Supabase
                 const docData = { 
                     title: newTitle.trim(), 
                     description: newDesc.trim() || "Sem descrição.",
@@ -400,24 +392,25 @@
                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                                     {loading && <div className="col-span-full flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div></div>}
                                     {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => {
+                                        // AQUI ESTÁ A CORREÇÃO: A cor é buscada do objeto doc
                                         const style = COLORS[doc.colorKey] || COLORS['yellow'];
                                         return (
                                             <div 
                                                 key={doc.id} 
                                                 onClick={() => openCardAsModal(doc)}
-                                                className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-lg hover:border-[#FF9900] transition-all duration-200 cursor-pointer flex flex-col h-full relative group"
+                                                className={`${style.bg} rounded-2xl border ${style.border} p-5 hover:shadow-lg hover:border-[#FF9900] transition-all duration-200 cursor-pointer flex flex-col h-full relative group`}
                                             >
-                                                <div className="absolute top-3 right-3 flex items-center gap-1 text-gray-400 bg-white/60 backdrop-blur-sm p-1 rounded-full">
+                                                <div className="absolute top-3 right-3 flex items-center gap-1 text-gray-500 bg-white/60 backdrop-blur-sm p-1 rounded-full">
                                                     <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); openCardAsModal(doc); }}></i>
                                                     <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
                                                 </div>
                                                 
                                                 <div className="flex items-start justify-between mb-2">
-                                                    <h3 className="text-base font-bold text-gray-800 leading-tight flex-1 pr-12 truncate">{doc.title}</h3>
+                                                    <h3 className={`text-base font-bold ${style.text} leading-tight flex-1 pr-12 truncate`}>{doc.title}</h3>
                                                 </div>
                                                 
                                                 <div 
-                                                    className="text-sm text-gray-600 leading-relaxed mb-3 flex-1 overflow-hidden"
+                                                    className="text-sm text-gray-700 leading-relaxed mb-3 flex-1 overflow-hidden"
                                                     style={{ maxHeight: 'calc(140px + 2rem)' }}
                                                 >
                                                     <div 
@@ -431,7 +424,7 @@
                                                 </div>
 
                                                 {doc.fileAttachment && (
-                                                    <div className="mb-0 bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-3 cursor-pointer hover:bg-gray-100 transition-colors" onClick={(e) => { e.stopPropagation(); if(doc.file_url) window.open(doc.file_url, '_blank'); else alert("Arquivo sem URL salva."); }}>
+                                                    <div className="mb-0 bg-white/50 border border-gray-200 rounded-lg p-3 flex items-center gap-3 cursor-pointer hover:bg-white/80 transition-colors" onClick={(e) => { e.stopPropagation(); if(doc.file_url) window.open(doc.file_url, '_blank'); else alert("Arquivo sem URL salva."); }}>
                                                         <div className="bg-white p-1.5 rounded border border-gray-200"><i className="fas fa-paperclip text-blue-500 text-xs"></i></div>
                                                         <span className="text-xs text-gray-600 truncate flex-1">{doc.fileAttachment}</span>
                                                         <span className="text-[10px] font-medium text-blue-600">Abrir</span>
@@ -445,7 +438,7 @@
                         </div>
                     </div>
 
-                    {/* MODAL COM EDITOR VISUAL */}
+                    {/* MODAL COM EDITOR VISUAL E SELETOR DE CORES */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden modal-enter max-h-[90vh] flex flex-col">
@@ -476,12 +469,10 @@
                                         </label>
                                         <input type="file" ref={imageInputRef} onChange={handleImageSelect} accept="image/*" />
                                         
-                                        {/* EDITOR VISUAL SLATE */}
                                         <div className="mt-2">
                                             <VisualEditor 
                                                 value={useMemo(() => deserializeFromText(newDesc), [newDesc])}
                                                 onChange={handleEditorChange}
-                                                onUploadImage={handleEditorImageUpload}
                                             />
                                         </div>
                                     </div>
