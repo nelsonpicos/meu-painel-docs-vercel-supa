@@ -75,7 +75,6 @@
             const descTextareaRef = useRef(null); 
             const imageInputRef = useRef(null);
 
-            // --- ESTADO DA VISUALIZAÇÃO DA IMAGEM (LIGHTBOX) ---
             const [lightboxImage, setLightboxImage] = useState(null);
 
             const loadDocuments = async () => {
@@ -138,9 +137,14 @@
             };
 
             const handleDeleteDocument = async (id, title) => {
-                if (!confirm(`Tem certeza que deseja excluir "${title}"?`)) return;
+                if (!confirm(`Tem certeza que deseja excluir a nota "${title}"?`)) return;
                 const { error } = await supabase.from('documents').delete().eq('id', id);
-                if (!error) setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
+                if (!error) {
+                    setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
+                    if (isModalOpen) closeModal(); // Fecha o modal se estiver aberto
+                } else {
+                    alert("Erro ao excluir a nota.");
+                }
             };
 
             const insertTextAtCursor = (text) => {
@@ -187,6 +191,7 @@
                 e.target.value = null;
             };
 
+            // Função para renderizar a imagem dentro do texto
             const renderDescription = (text) => {
                 if (!text) return "";
                 let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -194,6 +199,19 @@
                 const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
                 safeText = safeText.replace(imgRegex, (match, altText, url) => {
                     return `<div class="my-2"><img src="${url}" alt="${altText}" class="w-full h-auto rounded-lg border border-gray-100 shadow-sm max-h-[140px] object-contain bg-gray-50 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.handleImageClick('${url}')" /></div>`;
+                });
+                return safeText;
+            };
+
+            // Função "Parser" que converte o código de imagem de volta para HTML visual
+            // Isso é usado DENTRO do modal para mostrar a imagem, e não o código cru.
+            const renderDescriptionForEdit = (text) => {
+                if (!text) return "";
+                let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                safeText = safeText.replace(/\n/g, "<br />");
+                const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
+                safeText = safeText.replace(imgRegex, (match, altText, url) => {
+                    return `<div class="my-3"><img src="${url}" alt="${altText}" class="w-full h-auto rounded-xl border border-gray-200 shadow-sm max-h-[300px] object-contain bg-gray-50" /></div>`;
                 });
                 return safeText;
             };
@@ -306,13 +324,14 @@
                                                 className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-lg hover:border-[#FF9900] transition-all duration-200 cursor-pointer flex flex-col h-full relative group"
                                             >
                                                 
-                                                <div className="absolute top-3 right-3 flex items-center gap-2 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                                    <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors text-sm" onClick={(e) => { e.stopPropagation(); openCardAsModal(doc); }}></i>
-                                                    <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors text-sm" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
+                                                {/* BOTÕES VISÍVEIS SEMPRE */}
+                                                <div className="absolute top-3 right-3 flex items-center gap-1 text-gray-400 bg-white/60 backdrop-blur-sm p-1 rounded-full">
+                                                    <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); openCardAsModal(doc); }}></i>
+                                                    <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
                                                 </div>
                                                 
                                                 <div className="flex items-start justify-between mb-2">
-                                                    <h3 className="text-base font-bold text-gray-800 leading-tight flex-1 pr-8 truncate">{doc.title}</h3>
+                                                    <h3 className="text-base font-bold text-gray-800 leading-tight flex-1 pr-12 truncate">{doc.title}</h3>
                                                 </div>
                                                 
                                                 <div 
@@ -344,13 +363,25 @@
                         </div>
                     </div>
 
-                    {/* MODAL DE EDIÇÃO/CRIAÇÃO */}
+                    {/* MODAL DE EDIÇÃO/CRIAÇÃO COM PREVIEW DE IMAGEM E BOTÃO DE EXCLUIR */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden modal-enter max-h-[90vh] flex flex-col">
                                 <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-100 shrink-0">
                                     <h3 className="text-base sm:text-lg font-bold text-gray-800">{editingId ? 'Editar Nota' : 'Nova Nota'}</h3>
-                                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors"><i className="fas fa-times text-xl"></i></button>
+                                    <div className="flex items-center gap-3">
+                                        {/* Botão de Excluir dentro do Modal */}
+                                        {editingId && (
+                                            <button 
+                                                onClick={() => handleDeleteDocument(editingId, newTitle)}
+                                                className="text-red-400 hover:text-red-600 transition-colors"
+                                                title="Excluir esta nota"
+                                            >
+                                                <i className="fas fa-trash-alt text-lg"></i>
+                                            </button>
+                                        )}
+                                        <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors"><i className="fas fa-times text-xl"></i></button>
+                                    </div>
                                 </div>
                                 <div className="p-4 sm:p-6 space-y-4 overflow-y-auto">
                                     <div><label className="block text-sm font-medium text-gray-700 mb-1">Título</label><input type="text" className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus /></div>
@@ -363,12 +394,25 @@
                                             </button>
                                         </label>
                                         <input type="file" ref={imageInputRef} onChange={handleImageSelect} accept="image/*" />
+                                        
+                                        {/* ÁREA DE EDIÇÃO */}
                                         <textarea 
                                             ref={descTextareaRef}
-                                            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-32"
+                                            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-32 mb-2"
                                             value={newDesc} onChange={(e) => setNewDesc(e.target.value)} onPaste={handlePaste}
                                             placeholder="Digite sua nota. Use o botão 'Inserir Imagem' para adicionar fotos."
                                         ></textarea>
+
+                                        {/* PREVIEW DA IMAGEM (Exibição da imagem em vez do código) */}
+                                        {newDesc && (
+                                            <div className="mt-3 border-t border-gray-100 pt-3">
+                                                <p className="text-[10px] text-gray-400 mb-2">Pré-visualização do conteúdo:</p>
+                                                <div 
+                                                    className="text-sm text-gray-700 [&_img]:w-full [&_img]:h-auto [&_img]:rounded-xl [&_img]:border [&_img]:border-gray-200 [&_img]:shadow-sm [&_img]:my-3"
+                                                    dangerouslySetInnerHTML={{ __html: renderDescriptionForEdit(newDesc) }}
+                                                ></div>
+                                            </div>
+                                        )}
                                     </div>
                                     
                                     <div>
@@ -412,7 +456,7 @@
                         </div>
                     )}
 
-                    {/* --- LIGHTBOX (VISUALIZAÇÃO AMPLIADA DA IMAGEM) --- */}
+                    {/* LIGHTBOX */}
                     {lightboxImage && (
                         <div 
                             className="fixed inset-0 z-[60] bg-black bg-opacity-90 flex items-center justify-center p-4 cursor-zoom-out"
@@ -435,14 +479,11 @@
             );
         };
 
-        // EXPOR A FUNÇÃO DE CLIQUE NO ESCOPO GLOBAL PARA O REACT
         window.handleImageClick = (url) => {
-            // Encontra a instância do App e atualiza o estado
             const appInstance = document.querySelector('#root').__reactRoot$?.current?.memoizedState?.element?.type?.prototype?.setLightboxImage;
             if (appInstance) {
                 appInstance(url);
             } else {
-                // Fallback para abrir em nova aba se o React não pegar
                 window.open(url, '_blank');
             }
         };
