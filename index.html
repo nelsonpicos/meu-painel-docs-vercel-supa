@@ -12,10 +12,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <!-- BIBLIOTECA DE EDIÇÃO DE TEXTO VISUAL (SLATE) -->
-    <script src="https://unpkg.com/slate@0.94.1/dist/slate.js"></script>
-    <script src="https://unpkg.com/slate-react@0.94.1/dist/slate-react.js"></script>
-    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; }
@@ -37,32 +33,6 @@
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        
-        /* ESTILOS DO EDITOR VISUAL */
-        .editor-container {
-            min-height: 100px;
-            border: 1px solid #d1d5db;
-            border-radius: 0.75rem;
-            padding: 12px 16px;
-            outline: none;
-            transition: all 0.2s;
-            background: white;
-        }
-        .editor-container:focus-within {
-            border-color: #FF9900;
-            box-shadow: 0 0 0 2px rgba(255, 153, 0, 0.2);
-        }
-        .editor-container img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 0.75rem;
-            border: 1px solid #e5e7eb;
-            margin: 12px 0;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            max-height: 300px;
-            object-fit: contain;
-            background: #f9fafb;
-        }
     </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col bg-[#f7f7f7] text-gray-700">
@@ -70,12 +40,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // --- IMPORTAÇÕES DO SLATE EDITOR ---
-        const { useState, useEffect, useRef, useCallback, useMemo } = React;
-        const { createEditor, Transforms, Editor, Text, Element as SlateElement } = window.Slate;
-        const { Slate, Editable, withReact } = window.SlateReact;
+        const { useState, useEffect, useRef } = React;
 
-        // --- FUNÇÕES DO SUPABASE ---
         const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -90,103 +56,6 @@
             slate: { label: 'Cinza', border: 'border-gray-300', text: 'text-gray-700', bg: 'bg-gray-100' }
         };
 
-        // --- FUNÇÕES DE CONVERSÃO DE TEXTO ---
-        const serializeToText = (nodes) => {
-            return nodes.map(n => {
-                if (Text.isText(n)) return n.text;
-                const children = n.children.map(c => serializeToText(c)).join('');
-                if (n.type === 'image') return `![${n.url}](${n.url})`;
-                return children;
-            }).join('');
-        };
-
-        // Função para transformar o Markdown `![text](url)` em Objetos Slate
-        const deserializeFromText = (text) => {
-            if (!text) return [{ type: 'paragraph', children: [{ text: '' }] }];
-            
-            const lines = text.split('\n');
-            const nodes = [];
-            
-            lines.forEach(line => {
-                const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
-                let match;
-                let lastIndex = 0;
-                const children = [];
-                
-                while ((match = imgRegex.exec(line)) !== null) {
-                    if (match.index > lastIndex) {
-                        children.push({ text: line.substring(lastIndex, match.index) });
-                    }
-                    children.push({ type: 'image', url: match[2], children: [{ text: '' }] });
-                    lastIndex = imgRegex.lastIndex;
-                }
-                if (lastIndex < line.length) {
-                    children.push({ text: line.substring(lastIndex) });
-                }
-                
-                if (children.length === 0) {
-                    nodes.push({ type: 'paragraph', children: [{ text: line }] });
-                } else {
-                    nodes.push({ type: 'paragraph', children });
-                }
-            });
-            
-            return nodes.length ? nodes : [{ type: 'paragraph', children: [{ text: '' }] }];
-        };
-
-        // --- COMPONENTE EDITOR DE TEXTO VISUAL ---
-        const VisualEditor = ({ value, onChange }) => {
-            const editor = useMemo(() => withReact(createEditor()), []);
-            const [editorValue, setEditorValue] = useState(value);
-
-            useEffect(() => {
-                setEditorValue(value);
-            }, [value]);
-
-            const handleChange = (newValue) => {
-                setEditorValue(newValue);
-                const plainText = serializeToText(newValue);
-                onChange(plainText);
-            };
-
-            const renderElement = useCallback(props => {
-                switch (props.element.type) {
-                    case 'image':
-                        return <ImageElement {...props} />;
-                    default:
-                        return <DefaultElement {...props} />;
-                }
-            }, []);
-
-            return (
-                <Slate editor={editor} value={editorValue} onChange={handleChange}>
-                    <Editable
-                        className="editor-container"
-                        placeholder="Digite sua nota..."
-                        renderElement={renderElement}
-                        renderLeaf={props => <span {...props.attributes}>{props.children}</span>}
-                    />
-                </Slate>
-            );
-        };
-
-        const DefaultElement = (props) => {
-            return <p {...props.attributes} className="mb-2">{props.children}</p>;
-        };
-
-        const ImageElement = (props) => {
-            const { attributes, children, element } = props;
-            return (
-                <div {...attributes} className="relative">
-                    <div contentEditable={false}>
-                        <img src={element.url} alt="Imagem na nota" />
-                    </div>
-                    {children}
-                </div>
-            );
-        };
-
-        // --- COMPONENTE PRINCIPAL DO APP ---
         const App = () => {
             const [searchTerm, setSearchTerm] = useState("");
             const [docs, setDocs] = useState([]);
@@ -203,6 +72,7 @@
             const [isUploading, setIsUploading] = useState(false);
             
             const fileInputRef = useRef(null);
+            const descTextareaRef = useRef(null); 
             const imageInputRef = useRef(null);
             const [lightboxImage, setLightboxImage] = useState(null);
 
@@ -219,7 +89,7 @@
                         desc: item.description || 'Sem descrição.',
                         date: new Date(item.created_at).toLocaleDateString('pt-BR'),
                         labels: ['#importante'],
-                        colorKey: item.color_key || 'yellow', // Garante a cor
+                        colorKey: item.color_key || 'yellow',
                         fileAttachment: item.file_name || null,
                         file_url: item.file_url || null
                     }));
@@ -276,8 +146,49 @@
                 }
             };
 
-            const handleEditorChange = (text) => {
-                setNewDesc(text);
+            // --- LÓGICA DE IMAGEM (TEXTO SIMPLES) ---
+            const insertTextAtCursor = (text) => {
+                const textarea = descTextareaRef.current;
+                if (!textarea) return;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                textarea.setRangeText(text, start, end, 'end');
+                setNewDesc(textarea.value);
+                setTimeout(() => {
+                    textarea.selectionStart = textarea.selectionEnd = start + text.length;
+                    textarea.focus();
+                }, 0);
+            };
+
+            const handlePaste = async (e) => {
+                const items = e.clipboardData.items;
+                let pastedImage = null;
+                for (let item of items) {
+                    if (item.type.indexOf('image') !== -1) {
+                        pastedImage = item.getAsFile();
+                        break;
+                    }
+                }
+                if (pastedImage) {
+                    e.preventDefault();
+                    const imageUrl = await uploadFileToSupabase(pastedImage);
+                    if (imageUrl) {
+                        const markdownImage = `\n![${pastedImage.name}](${imageUrl})\n`;
+                        insertTextAtCursor(markdownImage);
+                    }
+                }
+            };
+
+            const handleImageSelect = async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const imageUrl = await uploadFileToSupabase(file);
+                    if (imageUrl) {
+                        const markdownImage = `\n![${file.name}](${imageUrl})\n`;
+                        insertTextAtCursor(markdownImage);
+                    }
+                }
+                e.target.value = null;
             };
 
             const renderDescription = (text) => {
@@ -336,7 +247,6 @@
                     }
                 }
 
-                // Incluindo 'color_key' nos dados enviados para o Supabase
                 const docData = { 
                     title: newTitle.trim(), 
                     description: newDesc.trim() || "Sem descrição.",
@@ -392,7 +302,6 @@
                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                                     {loading && <div className="col-span-full flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF9900]"></div></div>}
                                     {!loading && docs.filter(doc => doc.title.toLowerCase().includes(searchTerm.toLowerCase())).map((doc) => {
-                                        // AQUI ESTÁ A CORREÇÃO: A cor é buscada do objeto doc
                                         const style = COLORS[doc.colorKey] || COLORS['yellow'];
                                         return (
                                             <div 
@@ -438,7 +347,7 @@
                         </div>
                     </div>
 
-                    {/* MODAL COM EDITOR VISUAL E SELETOR DE CORES */}
+                    {/* MODAL COM TEXTAREA SIMPLES */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden modal-enter max-h-[90vh] flex flex-col">
@@ -469,12 +378,12 @@
                                         </label>
                                         <input type="file" ref={imageInputRef} onChange={handleImageSelect} accept="image/*" />
                                         
-                                        <div className="mt-2">
-                                            <VisualEditor 
-                                                value={useMemo(() => deserializeFromText(newDesc), [newDesc])}
-                                                onChange={handleEditorChange}
-                                            />
-                                        </div>
+                                        <textarea 
+                                            ref={descTextareaRef}
+                                            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-32"
+                                            value={newDesc} onChange={(e) => setNewDesc(e.target.value)} onPaste={handlePaste}
+                                            placeholder="Digite sua nota. Use o botão 'Inserir Imagem' para adicionar fotos. (Use o código ![]())"
+                                        ></textarea>
                                     </div>
                                     
                                     <div>
