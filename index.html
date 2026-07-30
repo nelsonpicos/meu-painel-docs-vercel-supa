@@ -12,6 +12,10 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
+    <!-- BIBLIOTECA DE EDIÇÃO DE TEXTO VISUAL (SLATE) -->
+    <script src="https://unpkg.com/slate@0.94.1/dist/slate.js"></script>
+    <script src="https://unpkg.com/slate-react@0.94.1/dist/slate-react.js"></script>
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; }
@@ -33,6 +37,32 @@
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
+        
+        /* ESTILOS DO EDITOR VISUAL */
+        .editor-container {
+            min-height: 100px;
+            border: 1px solid #d1d5db;
+            border-radius: 0.75rem;
+            padding: 12px 16px;
+            outline: none;
+            transition: all 0.2s;
+            background: white;
+        }
+        .editor-container:focus-within {
+            border-color: #FF9900;
+            box-shadow: 0 0 0 2px rgba(255, 153, 0, 0.2);
+        }
+        .editor-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.75rem;
+            border: 1px solid #e5e7eb;
+            margin: 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            max-height: 300px;
+            object-fit: contain;
+            background: #f9fafb;
+        }
     </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col bg-[#f7f7f7] text-gray-700">
@@ -40,8 +70,12 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        // --- IMPORTAÇÕES DO SLATE EDITOR ---
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+        const { createEditor, Transforms, Editor, Text, Element as SlateElement } = window.Slate;
+        const { Slate, Editable, withReact } = window.SlateReact;
 
+        // --- FUNÇÕES DO SUPABASE ---
         const SUPABASE_URL = 'https://txvjclviogmaxndzuxle.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_N1677l9hUFxq_f4C9Y4BPQ_aZEdkd2_';
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -56,6 +90,103 @@
             slate: { label: 'Cinza', border: 'border-gray-300', text: 'text-gray-700', bg: 'bg-gray-100' }
         };
 
+        // --- FUNÇÕES DE CONVERSÃO DE TEXTO ---
+        const serializeToText = (nodes) => {
+            return nodes.map(n => {
+                if (Text.isText(n)) return n.text;
+                const children = n.children.map(c => serializeToText(c)).join('');
+                if (n.type === 'image') return `![${n.url}](${n.url})`;
+                return children;
+            }).join('');
+        };
+
+        // Função para transformar o Markdown `![text](url)` em Objetos Slate
+        const deserializeFromText = (text) => {
+            if (!text) return [{ type: 'paragraph', children: [{ text: '' }] }];
+            
+            const lines = text.split('\n');
+            const nodes = [];
+            
+            lines.forEach(line => {
+                const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
+                let match;
+                let lastIndex = 0;
+                const children = [];
+                
+                while ((match = imgRegex.exec(line)) !== null) {
+                    if (match.index > lastIndex) {
+                        children.push({ text: line.substring(lastIndex, match.index) });
+                    }
+                    children.push({ type: 'image', url: match[2], children: [{ text: '' }] });
+                    lastIndex = imgRegex.lastIndex;
+                }
+                if (lastIndex < line.length) {
+                    children.push({ text: line.substring(lastIndex) });
+                }
+                
+                if (children.length === 0) {
+                    nodes.push({ type: 'paragraph', children: [{ text: line }] });
+                } else {
+                    nodes.push({ type: 'paragraph', children });
+                }
+            });
+            
+            return nodes.length ? nodes : [{ type: 'paragraph', children: [{ text: '' }] }];
+        };
+
+        // --- COMPONENTE EDITOR DE TEXTO VISUAL ---
+        const VisualEditor = ({ value, onChange, onUploadImage }) => {
+            const editor = useMemo(() => withReact(createEditor()), []);
+            const [editorValue, setEditorValue] = useState(value);
+
+            useEffect(() => {
+                setEditorValue(value);
+            }, [value]);
+
+            const handleChange = (newValue) => {
+                setEditorValue(newValue);
+                const plainText = serializeToText(newValue);
+                onChange(plainText);
+            };
+
+            const renderElement = useCallback(props => {
+                switch (props.element.type) {
+                    case 'image':
+                        return <ImageElement {...props} onUploadImage={onUploadImage} />;
+                    default:
+                        return <DefaultElement {...props} />;
+                }
+            }, [onUploadImage]);
+
+            return (
+                <Slate editor={editor} value={editorValue} onChange={handleChange}>
+                    <Editable
+                        className="editor-container"
+                        placeholder="Digite sua nota..."
+                        renderElement={renderElement}
+                        renderLeaf={props => <span {...props.attributes}>{props.children}</span>}
+                    />
+                </Slate>
+            );
+        };
+
+        const DefaultElement = (props) => {
+            return <p {...props.attributes} className="mb-2">{props.children}</p>;
+        };
+
+        const ImageElement = (props) => {
+            const { attributes, children, element } = props;
+            return (
+                <div {...attributes} className="relative">
+                    <div contentEditable={false}>
+                        <img src={element.url} alt="Imagem na nota" />
+                    </div>
+                    {children}
+                </div>
+            );
+        };
+
+        // --- COMPONENTE PRINCIPAL DO APP ---
         const App = () => {
             const [searchTerm, setSearchTerm] = useState("");
             const [docs, setDocs] = useState([]);
@@ -72,9 +203,7 @@
             const [isUploading, setIsUploading] = useState(false);
             
             const fileInputRef = useRef(null);
-            const descTextareaRef = useRef(null); 
             const imageInputRef = useRef(null);
-
             const [lightboxImage, setLightboxImage] = useState(null);
 
             const loadDocuments = async () => {
@@ -141,57 +270,25 @@
                 const { error } = await supabase.from('documents').delete().eq('id', id);
                 if (!error) {
                     setDocs(prevDocs => prevDocs.filter(doc => doc.id !== id));
-                    if (isModalOpen) closeModal(); // Fecha o modal se estiver aberto
+                    if (isModalOpen) closeModal();
                 } else {
                     alert("Erro ao excluir a nota.");
                 }
             };
 
-            const insertTextAtCursor = (text) => {
-                const textarea = descTextareaRef.current;
-                if (!textarea) return;
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                textarea.setRangeText(text, start, end, 'end');
-                setNewDesc(textarea.value);
-                setTimeout(() => {
-                    textarea.selectionStart = textarea.selectionEnd = start + text.length;
-                    textarea.focus();
-                }, 0);
+            // --- LÓGICA DO EDITOR VISUAL ---
+            const handleEditorChange = (text) => {
+                setNewDesc(text);
             };
 
-            const handlePaste = async (e) => {
-                const items = e.clipboardData.items;
-                let pastedImage = null;
-                for (let item of items) {
-                    if (item.type.indexOf('image') !== -1) {
-                        pastedImage = item.getAsFile();
-                        break;
-                    }
-                }
-                if (pastedImage) {
-                    e.preventDefault();
-                    const imageUrl = await uploadFileToSupabase(pastedImage);
-                    if (imageUrl) {
-                        const markdownImage = `\n![${pastedImage.name}](${imageUrl})\n`;
-                        insertTextAtCursor(markdownImage);
-                    }
+            const handleEditorImageUpload = async (file) => {
+                const url = await uploadFileToSupabase(file);
+                if (url) {
+                    // A inserção é feita automaticamente pelo Slate
+                    // O App renderiza o visual e salva o texto real
                 }
             };
 
-            const handleImageSelect = async (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const imageUrl = await uploadFileToSupabase(file);
-                    if (imageUrl) {
-                        const markdownImage = `\n![${file.name}](${imageUrl})\n`;
-                        insertTextAtCursor(markdownImage);
-                    }
-                }
-                e.target.value = null;
-            };
-
-            // Função para renderizar a imagem dentro do texto
             const renderDescription = (text) => {
                 if (!text) return "";
                 let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -199,19 +296,6 @@
                 const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
                 safeText = safeText.replace(imgRegex, (match, altText, url) => {
                     return `<div class="my-2"><img src="${url}" alt="${altText}" class="w-full h-auto rounded-lg border border-gray-100 shadow-sm max-h-[140px] object-contain bg-gray-50 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.handleImageClick('${url}')" /></div>`;
-                });
-                return safeText;
-            };
-
-            // Função "Parser" que converte o código de imagem de volta para HTML visual
-            // Isso é usado DENTRO do modal para mostrar a imagem, e não o código cru.
-            const renderDescriptionForEdit = (text) => {
-                if (!text) return "";
-                let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                safeText = safeText.replace(/\n/g, "<br />");
-                const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
-                safeText = safeText.replace(imgRegex, (match, altText, url) => {
-                    return `<div class="my-3"><img src="${url}" alt="${altText}" class="w-full h-auto rounded-xl border border-gray-200 shadow-sm max-h-[300px] object-contain bg-gray-50" /></div>`;
                 });
                 return safeText;
             };
@@ -323,8 +407,6 @@
                                                 onClick={() => openCardAsModal(doc)}
                                                 className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-lg hover:border-[#FF9900] transition-all duration-200 cursor-pointer flex flex-col h-full relative group"
                                             >
-                                                
-                                                {/* BOTÕES VISÍVEIS SEMPRE */}
                                                 <div className="absolute top-3 right-3 flex items-center gap-1 text-gray-400 bg-white/60 backdrop-blur-sm p-1 rounded-full">
                                                     <i className="fas fa-pen hover:text-[#FF9900] cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); openCardAsModal(doc); }}></i>
                                                     <i className="fas fa-trash-alt hover:text-red-500 cursor-pointer transition-colors text-sm p-1" onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.title); }}></i>
@@ -363,14 +445,13 @@
                         </div>
                     </div>
 
-                    {/* MODAL DE EDIÇÃO/CRIAÇÃO COM PREVIEW DE IMAGEM E BOTÃO DE EXCLUIR */}
+                    {/* MODAL COM EDITOR VISUAL */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden modal-enter max-h-[90vh] flex flex-col">
                                 <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-100 shrink-0">
                                     <h3 className="text-base sm:text-lg font-bold text-gray-800">{editingId ? 'Editar Nota' : 'Nova Nota'}</h3>
                                     <div className="flex items-center gap-3">
-                                        {/* Botão de Excluir dentro do Modal */}
                                         {editingId && (
                                             <button 
                                                 onClick={() => handleDeleteDocument(editingId, newTitle)}
@@ -395,24 +476,14 @@
                                         </label>
                                         <input type="file" ref={imageInputRef} onChange={handleImageSelect} accept="image/*" />
                                         
-                                        {/* ÁREA DE EDIÇÃO */}
-                                        <textarea 
-                                            ref={descTextareaRef}
-                                            className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#FF9900] focus:border-transparent transition-all resize-none h-32 mb-2"
-                                            value={newDesc} onChange={(e) => setNewDesc(e.target.value)} onPaste={handlePaste}
-                                            placeholder="Digite sua nota. Use o botão 'Inserir Imagem' para adicionar fotos."
-                                        ></textarea>
-
-                                        {/* PREVIEW DA IMAGEM (Exibição da imagem em vez do código) */}
-                                        {newDesc && (
-                                            <div className="mt-3 border-t border-gray-100 pt-3">
-                                                <p className="text-[10px] text-gray-400 mb-2">Pré-visualização do conteúdo:</p>
-                                                <div 
-                                                    className="text-sm text-gray-700 [&_img]:w-full [&_img]:h-auto [&_img]:rounded-xl [&_img]:border [&_img]:border-gray-200 [&_img]:shadow-sm [&_img]:my-3"
-                                                    dangerouslySetInnerHTML={{ __html: renderDescriptionForEdit(newDesc) }}
-                                                ></div>
-                                            </div>
-                                        )}
+                                        {/* EDITOR VISUAL SLATE */}
+                                        <div className="mt-2">
+                                            <VisualEditor 
+                                                value={useMemo(() => deserializeFromText(newDesc), [newDesc])}
+                                                onChange={handleEditorChange}
+                                                onUploadImage={handleEditorImageUpload}
+                                            />
+                                        </div>
                                     </div>
                                     
                                     <div>
